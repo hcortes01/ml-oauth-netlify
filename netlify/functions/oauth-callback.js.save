@@ -1,0 +1,197 @@
+exports.handler = async (event) => {
+  try {
+    console.log('*** oauth-callback invoked ***');
+    console.log('event.queryStringParameters:', event.queryStringParameters);
+
+    const params = event.queryStringParameters || {};
+    const code = params.code;
+    if (!code) {
+      console.log('Missing code in callback');
+      return { statusCode: 400, body: 'Missing code' };
+    }
+
+    // env vars
+    const CLIENT_ID = process.env.ML_CLIENT_ID;
+    const CLIENT_SECRET = process.env.ML_CLIENT_SECRET;
+    const REDIRECT_URI = process.env.ML_REDIRECT_URI;
+    console.log('CLIENT_ID present:', !!CLIENT_ID);
+    console.log('REDIRECT_URI from env:', REDIRECT_URI);
+
+    // Exchange code for token
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      code,
+      redirect_uri: REDIRECT_URI
+    }).toString();
+
+    console.log('Requesting token from ML...');
+    const tokenRes = await fetch('https://api.mercadolibre.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body
+    });
+
+    const tokenJson = await tokenRes.json();
+    console.log('tokenRes.status:', tokenRes.status);
+    console.log('tokenJson:', tokenJson);
+
+    if (!tokenRes.ok) {
+      // show message to help debugging
+      return {
+        statusCode: tokenRes.status,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tokenJson)
+      };
+    }
+
+    // optional: POST to your webhook if configured
+    if (process.env.MAKE_WEBHOOK_URL) {
+      try {
+        await fetch(process.env.MAKE_WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: 'ml_oauth', data: tokenJson })
+        });
+        console.log('Webhook posted');
+      } catch (err) {
+        console.log('Webhook error', String(err));
+      }
+    }
+
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      body: '<html><body><h2>Autorización completada ✅</h2><p>Puedes cerrar esta ventana.</p></body></html>'
+    };
+
+  } catch (err) {
+    console.log('Function error', String(err));
+    return { statusCode: 500, body: String(err) };
+  }
+};
+exports.handler = async (event) => {
+  try {
+    const params = event.queryStringParameters || {};
+    const code = params.code;
+    if (!code) return { statusCode: 400, body: 'Missing code' };
+
+    const CLIENT_ID = process.env.ML_CLIENT_ID;
+    const CLIENT_SECRET = process.env.ML_CLIENT_SECRET;
+    const REDIRECT_URI = process.env.ML_REDIRECT_URI;
+    const MAKE_WEBHOOK = process.env.MAKE_WEBHOOK_URL || '';
+
+    const tokenRes = await fetch('https://api.mercadolibre.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        code,
+        redirect_uri: REDIRECT_URI
+      })
+    });
+
+    const tokenJson = await tokenRes.json();
+    if (!tokenRes.ok) return { statusCode: tokenRes.status, body: JSON.stringify(tokenJson) };
+
+    if (MAKE_WEBHOOK) {
+      await fetch(MAKE_WEBHOOK, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'ml_oauth', data: tokenJson })
+      });
+    }
+
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'text/html' },
+      body: '<html><body><h2>Autorización completada ✅</h2><p>Puedes cerrar esta ventana.</p></body></html>'
+    };
+  } catch (err) {
+    return { statusCode: 500, body: String(err) };
+  }
+};
+git add ., git commit -m "Add logs to oauth callback", git push
+git commit -m "Add logs to oauth callback", git push
+// netlify/functions/oauth-callback.js
+exports.handler = async (event, context) => {
+  try {
+    console.log('*** oauth-callback invoked ***', { ts: new Date().toISOString() });
+
+    const params = event.queryStringParameters || {};
+    console.log('query params:', params);
+
+    const code = params.code;
+    if (!code) {
+      console.log('Missing code -> returning 400');
+      return { statusCode: 400, body: 'Missing code' };
+    }
+
+    const CLIENT_ID = process.env.ML_CLIENT_ID;
+    const CLIENT_SECRET = process.env.ML_CLIENT_SECRET;
+    const REDIRECT_URI = process.env.ML_REDIRECT_URI;
+    const MAKE_WEBHOOK = process.env.MAKE_WEBHOOK_URL || '';
+
+    console.log('env check', {
+      hasClientId: !!CLIENT_ID,
+      hasClientSecret: !!CLIENT_SECRET,
+      redirectUri: REDIRECT_URI
+    });
+
+    // Build body for token request
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: CLIENT_ID || '',
+      client_secret: CLIENT_SECRET || '',
+      code,
+      redirect_uri: REDIRECT_URI || ''
+    }).toString();
+
+    console.log('requesting token (masked client_id):', { client_id_length: (CLIENT_ID || '').length, redirect_uri: REDIRECT_URI });
+
+    const tokenRes = await fetch('https://api.mercadolibre.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body
+    });
+
+    console.log('token response status:', tokenRes.status);
+
+    const tokenJson = await tokenRes.json();
+    console.log('token response body (partial):', JSON.stringify(tokenJson).slice(0, 1000));
+
+    if (!tokenRes.ok) {
+      // return status and body so you can see ML error in Netlify logs
+      console.log('Token exchange failed, returning ML error to client');
+      return { statusCode: tokenRes.status, body: JSON.stringify(tokenJson) };
+    }
+
+    // optional: forward token to your webhook (Make / internal system)
+    if (MAKE_WEBHOOK) {
+      try {
+        await fetch(MAKE_WEBHOOK, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: 'ml_oauth', data: tokenJson })
+        });
+        console.log('Forwarded token to MAKE_WEBHOOK');
+      } catch (err) {
+        console.log('Error when forwarding to MAKE_WEBHOOK', String(err));
+      }
+    }
+
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'text/html' },
+      body: '<html><body><h2>Autorización completada ✅</h2><p>Puedes cerrar esta ventana.</p></body></html>'
+    };
+  } catch (err) {
+    console.log('Unhandled exception', String(err));
+    return { statusCode: 500, body: String(err) };
+  }
+};
+^X
+
